@@ -1,0 +1,20 @@
+# local-toolkit bash additions
+
+# shared command history across all sessions
+shopt -s histappend
+HISTSIZE=100000
+HISTFILESIZE=100000
+HISTCONTROL=ignoredups:erasedups
+PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
+
+export EDITOR="emacsclient -t -a emacs"
+export VISUAL="$EDITOR"
+
+alias ll='ls -lah --color=auto'
+alias gs='git status -sb'
+alias gco='git checkout'
+alias gp='git pull --ff-only'
+
+if [ -d "$HOME/local-toolkit/bin" ]; then
+  export PATH="$HOME/local-toolkit/bin:$PATH"
+fi
