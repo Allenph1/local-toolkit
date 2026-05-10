@@ -51,37 +51,62 @@ try {
 
   console.log("Filling credentials...");
   const emailInput = page.locator("input[name='username'], input[type='email'], input[placeholder*='Email']").first();
+  await emailInput.waitFor({ state: "visible", timeout: 15000 });
   await emailInput.fill(email);
 
   const passwordInput = page.locator("input[name*='password'], input[type='password']").first();
+  await passwordInput.waitFor({ state: "visible", timeout: 15000 });
   await passwordInput.fill(password);
 
   console.log("Clicking login...");
-  const loginBtn = page.locator("button:has-text('LOGIN'), button:has-text('Login'):not(:has-text('Google'))").first();
+  const loginBtn = page.locator("button:has-text('LOGIN'), button:has-text('Login'):not(:has-text('Google')), button[type='submit']").first();
+  await loginBtn.waitFor({ state: "visible", timeout: 15000 });
   await loginBtn.click();
 
-  console.log("Waiting for post-login (60s timeout for 2FA)...");
-  // First wait: detect successful auth by URL/hash change
-  await page.waitForFunction(
-    () => {
-      const url = window.location.href;
-      return url.includes("my.siteground.com") && (url.includes("hash=") || !url.includes("login"));
-    },
-    { timeout: 10000 }
-  );
-
-  console.log("Auth detected, waiting for dashboard or 2FA to complete...");
-  // Second wait: if 2FA is pending, wait for full dashboard load
-  await page.waitForFunction(
-    () => {
-      const url = window.location.href;
-      return url.includes("my.siteground.com") && !url.includes("hash=");
-    },
-    { timeout: 60000 }
-  ).catch(() => {
-    // If still stuck at hash, that's OK - means we're authenticated but waiting for 2FA
-    console.log("2FA checkpoint: awaiting user completion...");
-  });
+  console.log("Waiting for authentication outcome...");
+  let state = "unknown";
+  let diagnostics = {
+    challengeDetected: false,
+    twoFactorDetected: false,
+    credentialErrorDetected: false
+  };
+  try {
+    await page.waitForURL(
+      (url) => url.href.includes("my.siteground.com") && !url.href.includes("login"),
+      { timeout: 70000 }
+    );
+    state = "authenticated";
+  } catch (_error) {
+    const currentUrl = page.url();
+    const bodyText = ((await page.textContent("body")) || "").toLowerCase();
+    diagnostics = {
+      challengeDetected:
+        bodyText.includes("captcha") ||
+        bodyText.includes("verify you are human") ||
+        bodyText.includes("security challenge"),
+      twoFactorDetected:
+        currentUrl.includes("hash=") ||
+        bodyText.includes("2fa") ||
+        bodyText.includes("two-factor") ||
+        bodyText.includes("verification code") ||
+        bodyText.includes("authenticator"),
+      credentialErrorDetected:
+        bodyText.includes("invalid") ||
+        bodyText.includes("incorrect") ||
+        bodyText.includes("wrong password")
+    };
+    if (
+      diagnostics.twoFactorDetected
+    ) {
+      state = "pending_2fa";
+    } else if (diagnostics.credentialErrorDetected) {
+      state = "auth_failed";
+    } else if (diagnostics.challengeDetected) {
+      state = "challenge_required";
+    } else if (currentUrl.includes("login.siteground.com")) {
+      state = "login_page_timeout";
+    }
+  }
 
   const title = await page.title();
   const elapsedMs = Date.now() - started;
@@ -93,10 +118,13 @@ try {
   console.log(
     JSON.stringify(
       {
-        ok: true,
+        ok: state === "authenticated" || state === "pending_2fa",
+        state,
+        url: page.url(),
+        httpStatus: response ? response.status() : null,
         title,
+        diagnostics,
         elapsedMs,
-        authenticated: true,
         screenshotPath: screenshot || null
       },
       null,
