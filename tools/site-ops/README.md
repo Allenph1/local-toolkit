@@ -52,6 +52,9 @@ secrets run -- npm run sg-read -- list-sites
 secrets run -- npm run sg-read -- list-ssh-keys --site example.com
 ```
 
+`sg-read` tries cached auth first (`.data/siteground-auth.json`), then automatic login.
+If a challenge/2FA blocks automation, it returns a prompt and `nextCommand`; complete the challenge and rerun.
+
 Example map file:
 
 ```text

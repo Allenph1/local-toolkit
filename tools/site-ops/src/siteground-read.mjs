@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { chromium } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
+import readline from "node:readline/promises";
 
 function parseArgs() {
   const out = { action: "", site: "" };
@@ -66,6 +69,49 @@ async function loginAndClassify(page, email, password) {
     url: page.url(),
     loginStatus: response ? response.status() : null
   };
+}
+
+async function checkAuthenticatedSession(page) {
+  const response = await page.goto("https://my.siteground.com/paneladmin/domains", {
+    waitUntil: "domcontentloaded",
+    timeout: 30000
+  });
+  const url = page.url();
+  const authenticated = url.includes("my.siteground.com") && !url.includes("login");
+  return {
+    authenticated,
+    state: authenticated ? "authenticated" : "auth_required",
+    url,
+    loginStatus: response ? response.status() : null
+  };
+}
+
+function authStatePath() {
+  return process.env.SITEGROUND_AUTH_STATE || "/workspace/.data/siteground-auth.json";
+}
+
+function ensureParentDir(filePath) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function hasStateFile(filePath) {
+  try {
+    return fs.existsSync(filePath) && fs.statSync(filePath).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function promptRetryIfInteractive(promptText) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await rl.question(`${promptText} [y/N]: `);
+    return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
 }
 
 async function listSites(page) {
@@ -153,13 +199,55 @@ async function main() {
   }
 
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  const statePath = authStatePath();
+  let context;
+  let page;
 
   try {
-    const auth = await loginAndClassify(page, email, password);
-    if (args.screenshot) await page.screenshot({ path: args.screenshot, fullPage: true });
+    let auth;
+    let usedSavedSession = false;
+
+    if (hasStateFile(statePath)) {
+      context = await browser.newContext({ storageState: statePath });
+      page = await context.newPage();
+      auth = await checkAuthenticatedSession(page);
+      usedSavedSession = auth.authenticated;
+      if (!auth.authenticated) {
+        await context.close();
+        context = undefined;
+        page = undefined;
+      }
+    }
+
+    if (!usedSavedSession) {
+      context = await browser.newContext();
+      page = await context.newPage();
+      auth = await loginAndClassify(page, email, password);
+
+      if (auth.state === "authenticated") {
+        ensureParentDir(statePath);
+        await context.storageState({ path: statePath });
+      } else if (auth.state === "challenge_required" || auth.state === "pending_2fa" || auth.state === "login_page_timeout") {
+        const shouldRetry = await promptRetryIfInteractive(
+          "SiteGround challenge detected. Complete it in your browser/session, then retry now?"
+        );
+        if (shouldRetry) {
+          auth = await loginAndClassify(page, email, password);
+          if (auth.state === "authenticated") {
+            ensureParentDir(statePath);
+            await context.storageState({ path: statePath });
+          }
+        }
+      }
+    }
+
+    if (args.screenshot && page) await page.screenshot({ path: args.screenshot, fullPage: true });
 
     if (auth.state !== "authenticated") {
+      const prompt =
+        auth.state === "challenge_required" || auth.state === "pending_2fa" || auth.state === "login_page_timeout"
+          ? "Automatic login hit a challenge/verification step. Complete challenge in SiteGround, then rerun this command; it will auto-continue and cache session state when successful."
+          : null;
       console.log(
         JSON.stringify(
           {
@@ -169,6 +257,10 @@ async function main() {
             url: auth.url,
             loginStatus: auth.loginStatus,
             readOnly: true,
+            prompt,
+            nextCommand: `secrets run -- npm run sg-read -- ${args.action}${args.site ? ` --site ${args.site}` : ""}`,
+            authStatePath: statePath,
+            usedSavedSession,
             elapsedMs: Date.now() - started,
             screenshotPath: args.screenshot || null
           },
@@ -187,6 +279,8 @@ async function main() {
             ok: true,
             action: args.action,
             state: auth.state,
+            authStatePath: statePath,
+            usedSavedSession,
             url: page.url(),
             ...result,
             elapsedMs: Date.now() - started,
@@ -215,6 +309,8 @@ async function main() {
               message: "Provide --site when multiple or no sites are detected.",
               sitesDetected: sites.sites,
               readOnly: true,
+              authStatePath: statePath,
+              usedSavedSession,
               elapsedMs: Date.now() - started
             },
             null,
@@ -232,6 +328,8 @@ async function main() {
           ok: true,
           action: args.action,
           state: auth.state,
+          authStatePath: statePath,
+          usedSavedSession,
           url: page.url(),
           ...result,
           elapsedMs: Date.now() - started,
@@ -258,6 +356,7 @@ async function main() {
     );
     process.exitCode = 1;
   } finally {
+    if (context) await context.close();
     await browser.close();
   }
 }
