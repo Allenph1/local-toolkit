@@ -45,6 +45,13 @@ secret-run -- npm run probe-sg
 
 Accepted credential env names: `SITEGROUND_EMAIL`/`SITEGROUND_PASSWORD` or `SG_USERNAME`/`SG_PASSWORD`.
 
+SiteGround read-only inventory (no mutations):
+
+```bash
+secrets run -- npm run sg-read -- list-sites
+secrets run -- npm run sg-read -- list-ssh-keys --site example.com
+```
+
 Example map file:
 
 ```text

@@ -4,6 +4,8 @@ Minimal local MCP server for generic site operations.
 Exposes:
   - site_probe(url, screenshot_path?)
   - siteground_probe(screenshot_path?)
+  - siteground_list_sites(screenshot_path?)
+  - siteground_list_ssh_keys(site, screenshot_path?)
 """
 
 import json
@@ -45,6 +47,29 @@ def list_tools():
                 "inputSchema": {
                     "type": "object",
                     "properties": {
+                        "screenshot_path": {"type": "string"},
+                    },
+                    "required": [],
+                },
+            },
+            {
+                "name": "siteground_list_sites",
+                "description": "Read-only: list SiteGround sites/domains visible in the account.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "screenshot_path": {"type": "string"},
+                    },
+                    "required": [],
+                },
+            },
+            {
+                "name": "siteground_list_ssh_keys",
+                "description": "Read-only: inspect SSH key signals for a specific SiteGround site.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "site": {"type": "string"},
                         "screenshot_path": {"type": "string"},
                     },
                     "required": [],
@@ -122,6 +147,25 @@ def call_siteground_probe(arguments):
     return run_site_ops_command(cmd)
 
 
+def call_siteground_list_sites(arguments):
+    screenshot = arguments.get("screenshot_path")
+    cmd = ["npm", "run", "sg-read", "--", "list-sites"]
+    if screenshot:
+        cmd.extend(["--screenshot", screenshot])
+    return run_site_ops_command(cmd)
+
+
+def call_siteground_list_ssh_keys(arguments):
+    screenshot = arguments.get("screenshot_path")
+    site = arguments.get("site")
+    cmd = ["npm", "run", "sg-read", "--", "list-ssh-keys"]
+    if site:
+        cmd.extend(["--site", site])
+    if screenshot:
+        cmd.extend(["--screenshot", screenshot])
+    return run_site_ops_command(cmd)
+
+
 def send(msg):
     sys.stdout.write(json.dumps(msg) + "\n")
     sys.stdout.flush()
@@ -150,6 +194,10 @@ def main():
                 send({"jsonrpc": "2.0", "id": req_id, "result": call_site_probe(arguments)})
             elif name == "siteground_probe":
                 send({"jsonrpc": "2.0", "id": req_id, "result": call_siteground_probe(arguments)})
+            elif name == "siteground_list_sites":
+                send({"jsonrpc": "2.0", "id": req_id, "result": call_siteground_list_sites(arguments)})
+            elif name == "siteground_list_ssh_keys":
+                send({"jsonrpc": "2.0", "id": req_id, "result": call_siteground_list_ssh_keys(arguments)})
             else:
                 send(
                     {

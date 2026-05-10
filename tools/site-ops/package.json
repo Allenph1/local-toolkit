@@ -6,6 +6,7 @@
   "scripts": {
     "probe": "node src/probe.mjs",
     "probe-sg": "node src/probe-sg.mjs",
+    "sg-read": "node src/siteground-read.mjs",
     "test": "playwright test"
   },
   "devDependencies": {
