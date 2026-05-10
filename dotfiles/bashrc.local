@@ -16,11 +16,27 @@ alias ll='ls -lah --color=auto'
 alias gs='git status -sb'
 alias gco='git checkout'
 alias gp='git pull --ff-only'
+alias e='emacs'
+alias tk='toolkit'
+alias sec='secrets'
+alias srun='secret-run'
+
+emacs() {
+  "$HOME/local-toolkit/bin/emacs" "$@"
+}
+
+emacs-server() {
+  "$HOME/local-toolkit/bin/emacs-server" "$@"
+}
 
 if [ -d "$HOME/local-toolkit/bin" ]; then
   export PATH="$HOME/local-toolkit/bin:$PATH"
 fi
 
-if shopt -q login_shell 2>/dev/null && [ -x "$HOME/local-toolkit/bin/mcp-autostart" ]; then
-  "$HOME/local-toolkit/bin/mcp-autostart" >/dev/null 2>&1 &
+if shopt -q login_shell 2>/dev/null && [ -x "$HOME/local-toolkit/bin/toolkit" ]; then
+  "$HOME/local-toolkit/bin/toolkit" mcp start >/dev/null 2>&1 &
+fi
+
+if shopt -q login_shell 2>/dev/null && [ -t 1 ]; then
+  printf '\033[1;36mlocal-toolkit ready\033[0m — \033[1;33mtk help\033[0m, \033[1;33msecrets doctor\033[0m, \033[1;33mgh copilot\033[0m\n'
 fi

@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IMAGE="local-toolkit/emacs:latest"
+CONTAINER="local-toolkit-emacs"
+SERVER_NAME="${LOCAL_TOOLKIT_EMACS_SERVER_NAME:-toolkit}"
+SOCKET_FILE="${LOCAL_TOOLKIT_EMACS_SOCKET_FILE:-/tmp/emacs$(id -u)/${SERVER_NAME}}"
+# shellcheck source=bin/lib/toolkit.sh
+source "${ROOT_DIR}/bin/lib/toolkit.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: emacs-server [start|status|stop|restart|help]
+
+Run the Docker-backed Emacs daemon used by the toolkit.
+EOF
+}
+
+build_image() {
+  if ! tk_docker_exec image inspect "$IMAGE" >/dev/null 2>&1; then
+    tk_docker_exec build -t "$IMAGE" -f "${ROOT_DIR}/emacs/Dockerfile" "${ROOT_DIR}/emacs"
+  fi
+}
+
+wait_for_ready() {
+  local i
+  for i in $(seq 1 60); do
+    if emacsclient -s "$SOCKET_FILE" -e t >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+container_running() {
+  [[ "$(tk_docker_exec inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || echo false)" == "true" ]]
+}
+
+container_exists() {
+  tk_docker_exec inspect "$CONTAINER" >/dev/null 2>&1
+}
+
+start_container() {
+  if container_running; then
+    return 0
+  fi
+
+  build_image
+
+  if container_exists; then
+    tk_docker_exec start "$CONTAINER" >/dev/null
+    wait_for_ready
+    return 0
+  fi
+
+  tk_docker_exec run -d \
+    --name "$CONTAINER" \
+    --restart unless-stopped \
+    --user "$(id -u):$(id -g)" \
+    --env HOME="$HOME" \
+    --env USER="${USER:-$(id -un)}" \
+    --device /dev/ptmx \
+    --volume /dev/pts:/dev/pts \
+    --volume /tmp:/tmp \
+    --volume "$HOME:$HOME" \
+    --workdir "$HOME" \
+    "$IMAGE" \
+    emacs --fg-daemon="$SERVER_NAME" >/dev/null
+  wait_for_ready
+}
+
+case "${1:-start}" in
+  -h|--help|help)
+    usage
+    ;;
+  start)
+    start_container
+    ;;
+  status)
+    if emacsclient -s "$SOCKET_FILE" -e t >/dev/null 2>&1; then
+      echo "ready"
+    elif container_running; then
+      echo "running"
+    elif container_exists; then
+      echo "stopped"
+    else
+      echo "missing"
+      exit 1
+    fi
+    ;;
+  stop)
+    if container_exists; then
+      tk_docker_exec stop "$CONTAINER" >/dev/null
+    fi
+    ;;
+  restart)
+    if container_exists; then
+      tk_docker_exec restart "$CONTAINER" >/dev/null
+    else
+      start_container
+    fi
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

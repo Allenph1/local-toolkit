@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=bin/lib/toolkit.sh
+source "${ROOT_DIR}/bin/lib/toolkit.sh"
+
+usage() {
+  cat <<'EOF'
+local-toolkit
+
+Usage:
+  toolkit help
+  toolkit commands
+  toolkit doctor
+  toolkit secrets <subcommand>
+  toolkit mcp <subcommand>
+  toolkit emacs [args...]
+  toolkit emacs-server [start|status|stop|restart]
+  toolkit dockerx [docker args...]
+
+Core commands:
+  secrets       Manage pass-backed secrets
+  secret-run    Run one command with secrets injected
+  mcp           Manage the Dockerized MCP stack and launchers
+  emacs         Attach to the Docker-backed Emacs server
+  emacs-server  Manage the Docker-backed Emacs daemon
+  dockerx       Docker wrapper with docker-group fallback
+EOF
+}
+
+commands() {
+  cat <<'EOF'
+secrets       Manage pass-backed secrets
+secret-run    Run one command with secrets injected
+mcp           Manage the Dockerized MCP stack and launchers
+emacs         Attach to the Docker-backed Emacs server
+emacs-server  Manage the Docker-backed Emacs daemon
+dockerx       Docker wrapper with docker-group fallback
+gh copilot    GitHub Copilot CLI extension
+EOF
+}
+
+mcp_usage() {
+  cat <<'EOF'
+Usage:
+  toolkit mcp status
+  toolkit mcp start
+  toolkit mcp stop
+  toolkit mcp restart
+  toolkit mcp site-ops [--help]
+  toolkit mcp memory [--help]
+
+Examples:
+  toolkit mcp status
+  toolkit mcp site-ops < tools/site-ops/request.json
+  toolkit mcp memory < some-request.json
+EOF
+}
+
+mcp_compose() {
+  tk_docker_exec compose -f "$ROOT_DIR/mcp/docker-compose.yml" "$@"
+}
+
+mcp_start() {
+  mcp_compose up -d --build --remove-orphans
+}
+
+mcp_stop() {
+  mcp_compose down --remove-orphans
+}
+
+mcp_status() {
+  mcp_compose ps
+}
+
+mcp_restart() {
+  mcp_stop >/dev/null 2>&1 || true
+  mcp_start
+}
+
+mcp_stdio_usage() {
+  cat >&2 <<'EOF'
+Usage:
+  toolkit mcp site-ops < request.json
+  toolkit mcp memory < request.json
+
+These commands are stdio servers for MCP clients.
+EOF
+  exit 2
+}
+
+mcp_site_ops() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+    cat <<'EOF'
+Usage: toolkit mcp site-ops [--help]
+
+Run the Site Ops MCP stdio server in Docker.
+EOF
+    return 0
+  fi
+  [[ -t 0 ]] && mcp_stdio_usage
+
+  local env_file
+  env_file="$(mktemp)"
+  trap 'rm -f "$env_file"' RETURN
+
+  for name in SITEGROUND_EMAIL SITEGROUND_PASSWORD; do
+    local value="${!name:-}"
+    if [[ -n "$value" ]]; then
+      [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || tk_die "$name contains a newline; toolkit mcp site-ops only supports single-line secrets"
+      printf '%s=%s\n' "$name" "$value" >> "$env_file"
+    fi
+  done
+
+  tk_docker_exec run --rm -i \
+    --env-file "$env_file" \
+    --volume "${ROOT_DIR}:/workspace:rw" \
+    --volume "local-toolkit_site_ops_node_modules:/workspace/tools/site-ops/node_modules" \
+    --workdir /workspace \
+    local-toolkit/site-ops-mcp:latest \
+    python3 /workspace/mcp/site_ops_mcp_server.py
+}
+
+mcp_memory() {
+  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+    cat <<'EOF'
+Usage: toolkit mcp memory [--help]
+
+Run the semantic memory MCP stdio server in Docker.
+EOF
+    return 0
+  fi
+  [[ -t 0 ]] && mcp_stdio_usage
+
+  tk_docker_exec run --rm -i \
+    -v "${ROOT_DIR}:/workspace:rw" \
+    local-toolkit/site-ops-mcp:latest \
+    python3 /workspace/mcp/semantic_memory_mcp_server.py --db /workspace/.data/semantic_memory.sqlite
+}
+
+mcp_cmd() {
+  local sub="${1:-help}"
+  shift || true
+
+  case "$sub" in
+    help|-h|--help)
+      mcp_usage
+      ;;
+    status)
+      mcp_status
+      ;;
+    start)
+      mcp_start
+      ;;
+    stop)
+      mcp_stop
+      ;;
+    restart)
+      mcp_restart
+      ;;
+    site-ops)
+      mcp_site_ops "$@"
+      ;;
+    memory)
+      mcp_memory "$@"
+      ;;
+    *)
+      mcp_usage >&2
+      exit 2
+      ;;
+  esac
+}
+
+doctor() {
+  local tools=(bash git gh pass docker fzf)
+  local tool
+
+  tk_note "toolkit doctor"
+  for tool in "${tools[@]}"; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      printf '  %-8s [ok]\n' "$tool"
+    else
+      printf '  %-8s [missing]\n' "$tool"
+    fi
+  done
+  if pass ls >/dev/null 2>&1; then
+    printf '  %-8s [ok]\n' "secrets"
+  else
+    printf '  %-8s [not initialized]\n' "secrets"
+  fi
+  if command -v gpg >/dev/null 2>&1 && gpg --list-secret-keys --keyid-format LONG --with-colons 2>/dev/null | grep -q '^sec:'; then
+    printf '  %-8s [ok]\n' "gpg"
+  else
+    printf '  %-8s [not ready]\n' "gpg"
+  fi
+  if gh copilot --help >/dev/null 2>&1; then
+    printf '  %-8s [ok]\n' "copilot"
+  else
+    printf '  %-8s [missing]\n' "copilot"
+  fi
+  if command -v emacsclient >/dev/null 2>&1; then
+    printf '  %-8s [ok]\n' "emacs"
+  else
+    printf '  %-8s [missing]\n' "emacs"
+  fi
+  if "${ROOT_DIR}/bin/emacs-server" status >/dev/null 2>&1; then
+    printf '  %-8s [ok]\n' "emacs-server"
+  else
+    printf '  %-8s [not ready]\n' "emacs-server"
+  fi
+}
+
+case "${1:-help}" in
+  help|-h|--help)
+    usage
+    ;;
+  commands|list)
+    commands
+    ;;
+  doctor|status)
+    doctor
+    ;;
+  mcp)
+    shift
+    mcp_cmd "${1:-help}" "${@:2}"
+    ;;
+  secrets|secret-run|emacs|emacs-server|dockerx)
+    exec "${ROOT_DIR}/bin/$1" "${@:2}"
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac

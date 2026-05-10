@@ -7,11 +7,6 @@
 (setq-default indent-tabs-mode nil)
 (setq-default tab-width 4)
 
-;; emacs server for emacsclient
-(require 'server)
-(unless (server-running-p)
-  (server-start))
-
 ;; graphical frame defaults
 (setq initial-frame-alist '((width . 240) (height . 60)))
 

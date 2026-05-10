@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=bin/lib/toolkit.sh
+source "${ROOT_DIR}/bin/lib/toolkit.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: dockerx [docker args...]
+
+Run Docker, falling back to the docker group via sg if needed.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+esac
+
+tk_docker_exec "$@"

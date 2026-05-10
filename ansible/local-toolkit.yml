@@ -1,0 +1,368 @@
+- name: Bootstrap a local-toolkit node
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars:
+    repo_root: "{{ playbook_dir | dirname }}"
+    toolkit_user: "{{ lookup('env', 'SUDO_USER') | default(lookup('env', 'USER'), true) }}"
+    toolkit_home: "{{ lookup('env', 'HOME') }}"
+
+  tasks:
+    - name: Install packages on Debian-based systems
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - git
+          - curl
+          - tmux
+          - emacs-nox
+          - pass
+          - gnupg
+          - ca-certificates
+          - curl
+          - python3
+          - python3-pip
+          - python3-venv
+          - nodejs
+          - npm
+          - fzf
+          - ripgrep
+          - net-tools
+          - telnet
+          - gh
+          - ansible
+        state: present
+      become: true
+      when: ansible_pkg_mgr == 'apt'
+
+    - name: Ensure Docker apt keyring directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+      become: true
+      when: ansible_pkg_mgr == 'apt'
+
+    - name: Read Docker apt architecture
+      ansible.builtin.command: dpkg --print-architecture
+      register: docker_apt_arch
+      changed_when: false
+      become: true
+      when: ansible_pkg_mgr == 'apt'
+
+    - name: Install Docker apt key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/debian/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+      become: true
+      when: ansible_pkg_mgr == 'apt'
+
+    - name: Install Docker apt source
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/docker.sources
+        mode: "0644"
+        content: |
+          Types: deb
+          URIs: https://download.docker.com/linux/debian
+          Suites: {{ ansible_distribution_release }}
+          Components: stable
+          Architectures: {{ docker_apt_arch.stdout }}
+          Signed-By: /etc/apt/keyrings/docker.asc
+      become: true
+      when: ansible_pkg_mgr == 'apt'
+
+    - name: Refresh apt cache after Docker repo setup
+      ansible.builtin.apt:
+        update_cache: true
+      become: true
+      when: ansible_pkg_mgr == 'apt'
+
+    - name: Install Docker CE packages on Debian-based systems
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+      become: true
+      when: ansible_pkg_mgr == 'apt'
+
+    - name: Install packages on RedHat-based systems
+      ansible.builtin.dnf:
+        name:
+          - git
+          - curl
+          - tmux
+          - emacs-nox
+          - pass
+          - gnupg2
+          - python3
+          - python3-pip
+          - python3-venv
+          - nodejs
+          - npm
+          - fzf
+          - ripgrep
+          - net-tools
+          - telnet
+          - gh
+          - ansible-core
+          - docker
+          - docker-compose-plugin
+        state: present
+      become: true
+      when: ansible_pkg_mgr in ['dnf', 'yum']
+
+    - name: Install packages on Arch-based systems
+      ansible.builtin.pacman:
+        name:
+          - git
+          - curl
+          - tmux
+          - emacs-nox
+          - pass
+          - gnupg
+          - python3
+          - python-pip
+          - nodejs
+          - npm
+          - fzf
+          - ripgrep
+          - net-tools
+          - telnet
+          - gh
+          - ansible
+          - docker
+          - docker-compose
+        state: present
+      become: true
+      when: ansible_pkg_mgr == 'pacman'
+
+    - name: Ensure docker group exists
+      ansible.builtin.group:
+        name: docker
+        state: present
+      become: true
+
+    - name: Add toolkit user to docker group
+      ansible.builtin.user:
+        name: "{{ toolkit_user }}"
+        groups: docker
+        append: true
+      become: true
+      when: toolkit_user != 'root'
+
+    - name: Ensure docker service is enabled
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+      become: true
+      when: ansible_service_mgr == 'systemd'
+
+    - name: Create Docker SSD data directory
+      ansible.builtin.file:
+        path: /srv/ssd/docker
+        state: directory
+        owner: root
+        group: root
+        mode: "0711"
+      become: true
+
+    - name: Configure Docker data-root on SSD
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        mode: "0644"
+        content: |
+          {
+            "data-root": "/srv/ssd/docker",
+            "storage-driver": "overlay2"
+          }
+      become: true
+
+    - name: Restart Docker on SSD-backed data-root
+      ansible.builtin.service:
+        name: docker
+        state: restarted
+      become: true
+
+    - name: Create local-toolkit config directory
+      ansible.builtin.file:
+        path: "{{ toolkit_home }}/.config/local-toolkit"
+        state: directory
+        mode: "0755"
+
+    - name: Seed secrets map template
+      ansible.builtin.copy:
+        dest: "{{ toolkit_home }}/.config/local-toolkit/secrets.map"
+        mode: "0600"
+        force: false
+        content: |
+          # Map env vars to pass entries.
+          # APP_TOKEN=pass:app/token
+          # DB_PASSWORD=pass:db/password
+
+    - name: Link bash local config
+      ansible.builtin.file:
+        src: "{{ repo_root }}/dotfiles/bashrc.local"
+        dest: "{{ toolkit_home }}/.bashrc.local"
+        state: link
+        force: true
+
+    - name: Ensure bash sources toolkit config
+      ansible.builtin.lineinfile:
+        path: "{{ toolkit_home }}/.bashrc"
+        line: "[ -f ~/.bashrc.local ] && . ~/.bashrc.local"
+        create: true
+        state: present
+
+    - name: Link tmux config
+      ansible.builtin.file:
+        src: "{{ repo_root }}/dotfiles/tmux.conf"
+        dest: "{{ toolkit_home }}/.tmux.conf"
+        state: link
+        force: true
+
+    - name: Ensure emacs config directory exists
+      ansible.builtin.file:
+        path: "{{ toolkit_home }}/.emacs.d"
+        state: directory
+        mode: "0755"
+
+    - name: Link emacs init
+      ansible.builtin.file:
+        src: "{{ repo_root }}/dotfiles/init.el"
+        dest: "{{ toolkit_home }}/.emacs.d/init.el"
+        state: link
+        force: true
+
+    - name: Install site-ops npm dependencies
+      ansible.builtin.command: npm install
+      args:
+        chdir: "{{ repo_root }}/tools/site-ops"
+      become: false
+
+    - name: Install Playwright chromium browser
+      ansible.builtin.command: npx playwright install chromium
+      args:
+        chdir: "{{ repo_root }}/tools/site-ops"
+      become: false
+
+    - name: List installed gh extensions
+      ansible.builtin.command: gh extension list
+      register: gh_extension_list
+      changed_when: false
+      become: false
+
+    - name: Install GitHub Copilot gh extension
+      ansible.builtin.command: gh extension install github/gh-copilot
+      become: false
+      when: gh_extension_list.stdout is not search('^gh-copilot\\b', multiline=True)
+
+    - name: Read toolkit user home directory
+      ansible.builtin.command: getent passwd "{{ toolkit_user }}"
+      register: toolkit_passwd_entry
+      changed_when: false
+      become: false
+      when: toolkit_user != 'root'
+
+    - name: Record toolkit home directory
+      ansible.builtin.set_fact:
+        toolkit_home: "{{ toolkit_passwd_entry.stdout.split(':')[5] }}"
+      when: toolkit_user != 'root'
+
+    - name: Ensure GPG home directory exists
+      ansible.builtin.file:
+        path: "{{ toolkit_home }}/.gnupg"
+        state: directory
+        mode: "0700"
+      become: false
+      when: toolkit_user != 'root'
+
+    - name: Bootstrap local secret store
+      ansible.builtin.command: "{{ repo_root }}/bin/secrets gpg"
+      environment:
+        HOME: "{{ toolkit_home }}"
+        GNUPGHOME: "{{ toolkit_home }}/.gnupg"
+      become: false
+      when: toolkit_user != 'root'
+
+    - name: Ensure toolkit systemd user directory exists
+      ansible.builtin.file:
+        path: "{{ toolkit_home }}/.config/systemd/user"
+        state: directory
+        mode: "0755"
+
+    - name: Install MCP autostart user unit
+      ansible.builtin.copy:
+        dest: "{{ toolkit_home }}/.config/systemd/user/local-toolkit-mcp.service"
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=local-toolkit MCP autostart
+          After=default.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart={{ repo_root }}/bin/toolkit mcp start
+
+          [Install]
+          WantedBy=default.target
+
+    - name: Read toolkit user uid
+      ansible.builtin.command: id -u "{{ toolkit_user }}"
+      register: toolkit_uid_result
+      changed_when: false
+      become: false
+      when: toolkit_user != 'root'
+
+    - name: Install Emacs server user unit
+      ansible.builtin.copy:
+        dest: "{{ toolkit_home }}/.config/systemd/user/local-toolkit-emacs.service"
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=local-toolkit Emacs server
+          After=default.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart={{ repo_root }}/bin/emacs-server start
+
+          [Install]
+          WantedBy=default.target
+      become: false
+      when: toolkit_user != 'root'
+
+    - name: Reload user systemd units
+      ansible.builtin.command: systemctl --user daemon-reload
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ toolkit_uid_result.stdout }}"
+      become: false
+      when: toolkit_user != 'root'
+
+    - name: Enable and start Emacs server user service
+      ansible.builtin.command: systemctl --user enable --now local-toolkit-emacs.service
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ toolkit_uid_result.stdout }}"
+      become: false
+      when: toolkit_user != 'root'
+
+    - name: Enable and start MCP autostart user service
+      ansible.builtin.command: systemctl --user enable --now local-toolkit-mcp.service
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ toolkit_uid_result.stdout }}"
+      become: false
+      when: toolkit_user != 'root'
+
+    - name: Build and start the Docker MCP stack
+      ansible.builtin.command: docker compose -f mcp/docker-compose.yml up -d --build --remove-orphans
+      args:
+        chdir: "{{ repo_root }}"
+      become: true

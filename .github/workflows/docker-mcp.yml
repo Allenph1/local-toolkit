@@ -15,9 +15,16 @@ jobs:
       - name: Build MCP image
         run: docker compose -f mcp/docker-compose.yml build
 
-      - name: Smoke test tools/list
+      - name: Smoke test site tools/list
         run: |
           printf '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}\n' \
             | docker run --rm -i local-toolkit/site-ops-mcp:latest python3 /workspace/mcp/site_ops_mcp_server.py \
             | tee /tmp/mcp.out
           grep -q '"site_probe"' /tmp/mcp.out
+
+      - name: Smoke test memory stats
+        run: |
+          printf '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}\n' \
+            | docker run --rm -i local-toolkit/site-ops-mcp:latest python3 /workspace/mcp/semantic_memory_mcp_server.py \
+            | tee /tmp/memory-mcp.out
+          grep -q '"memory_stats"' /tmp/memory-mcp.out

@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SERVER_NAME="${LOCAL_TOOLKIT_EMACS_SERVER_NAME:-toolkit}"
+SOCKET_FILE="${LOCAL_TOOLKIT_EMACS_SOCKET_FILE:-/tmp/emacs$(id -u)/${SERVER_NAME}}"
+SYSTEM_EMACS="${LOCAL_TOOLKIT_SYSTEM_EMACS:-/usr/bin/emacs}"
+# shellcheck source=bin/lib/toolkit.sh
+source "${ROOT_DIR}/bin/lib/toolkit.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: emacs [emacsclient args...]
+
+Use the Docker-backed server for eval-style commands; normal editing falls
+back to local terminal Emacs if the container cannot open the TTY.
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ ! -x "$SYSTEM_EMACS" && -x /bin/emacs ]]; then
+  SYSTEM_EMACS="/bin/emacs"
+fi
+
+tk_require_cmd emacsclient
+"${ROOT_DIR}/bin/emacs-server" start >/dev/null 2>&1 || true
+
+if ! emacsclient -s "$SOCKET_FILE" -e t >/dev/null 2>&1; then
+  "${ROOT_DIR}/bin/emacs-server" start >/dev/null
+fi
+
+if ! emacsclient -s "$SOCKET_FILE" -e t >/dev/null 2>&1; then
+  tk_die "emacs server is unavailable. Run: emacs-server status"
+fi
+
+filtered_args=()
+for arg in "$@"; do
+  case "$arg" in
+    -nw|--no-window-system|-t|--tty)
+      continue
+      ;;
+    *)
+      filtered_args+=("$arg")
+      ;;
+  esac
+done
+
+if [[ ${#filtered_args[@]} -eq 0 ]]; then
+  exec "$SYSTEM_EMACS" -nw
+fi
+
+if printf '%s\n' "${filtered_args[@]}" | grep -Eq '^(--eval|-e)$'; then
+  exec emacsclient -s "$SOCKET_FILE" "${filtered_args[@]}"
+fi
+
+exec "$SYSTEM_EMACS" -nw "${filtered_args[@]}"

@@ -11,7 +11,10 @@ Playwright-based local automation for:
 - Never hardcode credentials in code or repo.
 - Pull credentials from environment variables or local keychain tooling.
 - For high-risk logins (like SiteGround), require manual 2FA completion.
-- For local secret injection, use `secret-run -- ...` with `~/.config/local-toolkit/secrets.map` and `pass`.
+- For local secret injection, use `secrets`/`secret-run -- ...` with `~/.config/local-toolkit/secrets.map` and `pass`.
+- The Ansible install bootstraps GPG and `pass` automatically.
+- Secret values are single-line only.
+- `secrets gpg` can auto-create a local GPG key and initialize `pass`.
 
 ## Commands
 
@@ -20,7 +23,10 @@ npm install
 npx playwright install chromium
 npm run probe -- --url https://example.com --screenshot artifacts/example.png
 npm test
-secret-run -- npm run probe-sg [--screenshot artifacts/sg.png]
+secret-run -- npm run probe -- --url https://example.com
+secrets add APP_TOKEN app/token
+secrets add DB_PASSWORD db/password
+secrets doctor
 ```
 
 ## SiteGround automation
@@ -40,8 +46,8 @@ secret-run -- npm run probe-sg
 Example map file:
 
 ```text
-SITEGROUND_EMAIL=pass:siteground/email
-SITEGROUND_PASSWORD=pass:siteground/password
+APP_TOKEN=pass:app/token
+DB_PASSWORD=pass:db/password
 ```
 
 **2FA Workflow:** When prompted for 2FA, manually complete it in the browser and the test will detect success/failure automatically.
