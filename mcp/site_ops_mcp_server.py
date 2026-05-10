@@ -47,8 +47,12 @@ def call_site_probe(arguments):
         text=True,
         env=os.environ.copy(),
     )
-    text = proc.stdout.strip() if proc.stdout.strip() else proc.stderr.strip()
+    stdout = proc.stdout.strip()
+    stderr = proc.stderr.strip()
+    text = stdout if stdout else stderr
     if proc.returncode != 0:
+        if stdout and stderr:
+            text = f"{stdout}\n\n{stderr}"
         return {"isError": True, "content": [{"type": "text", "text": text}]}
     return {"content": [{"type": "text", "text": text}]}
 
