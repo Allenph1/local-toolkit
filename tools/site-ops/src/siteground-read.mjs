@@ -24,7 +24,14 @@ function credentials() {
 function extractDomainsFromText(text) {
   const matches = text.match(/\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\b/gi) || [];
   const blocked = new Set(["siteground.com", "my.siteground.com", "google.com"]);
-  return [...new Set(matches.map((m) => m.toLowerCase()))].filter((m) => !blocked.has(m));
+  return [...new Set(matches.map((m) => m.toLowerCase()))].filter((m) => {
+    if (blocked.has(m)) return false;
+    if (!/[a-z]/.test(m)) return false;
+    const tld = m.split(".").pop() || "";
+    if (tld.length < 2 || tld.length > 24 || /[^a-z]/.test(tld)) return false;
+    if (m.includes(".maximum")) return false;
+    return true;
+  });
 }
 
 async function loginAndClassify(page, email, password) {
@@ -87,7 +94,12 @@ async function checkAuthenticatedSession(page) {
 }
 
 function authStatePath() {
-  return process.env.SITEGROUND_AUTH_STATE || "/workspace/.data/siteground-auth.json";
+  return process.env.SITEGROUND_AUTH_STATE || path.resolve(process.cwd(), ".data/siteground-auth.json");
+}
+
+function isHeadless() {
+  const raw = (process.env.SG_HEADLESS || "true").toLowerCase();
+  return !(raw === "0" || raw === "false" || raw === "no");
 }
 
 function ensureParentDir(filePath) {
@@ -115,7 +127,7 @@ async function promptRetryIfInteractive(promptText) {
 }
 
 async function listSites(page) {
-  await page.goto("https://my.siteground.com/paneladmin/domains", { waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.goto("https://my.siteground.com/paneladmin/sites", { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.waitForTimeout(1500);
 
   const bodyText = (await page.textContent("body")) || "";
@@ -140,7 +152,8 @@ async function listSites(page) {
     })
     .filter(Boolean);
 
-  const all = [...new Set([...fromText, ...fromHref])].sort();
+  const hrefOnly = [...new Set(fromHref)].sort();
+  const all = hrefOnly.length > 0 ? hrefOnly : [...new Set(fromText)].sort();
   return {
     count: all.length,
     sites: all,
@@ -149,25 +162,68 @@ async function listSites(page) {
 }
 
 async function listSshKeys(page, site) {
-  const encodedSite = encodeURIComponent(site);
-  await page.goto(`https://my.siteground.com/paneladmin/sites/${encodedSite}`, { waitUntil: "domcontentloaded", timeout: 30000 });
-  await page.waitForTimeout(1000);
-
-  const allText = ((await page.textContent("body")) || "").replace(/\r/g, "");
-  const lines = allText.split("\n").map((s) => s.trim()).filter(Boolean);
-
-  const sshLines = [];
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (lower.includes("ssh") || lower.includes("public key") || lower.includes("fingerprint") || lower.includes("ed25519") || lower.includes("rsa")) {
-      sshLines.push(line);
+  const encodedSite = encodeURIComponent(site.toLowerCase());
+  const startUrl = `https://my.siteground.com/paneladmin/sites/${encodedSite}`;
+  await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForTimeout(1200);
+  const discovered = await page.evaluate((siteName) => {
+    const anchors = Array.from(document.querySelectorAll("a[href]"));
+    const candidates = [];
+    for (const a of anchors) {
+      const href = a.getAttribute("href") || "";
+      const text = (a.textContent || "").toLowerCase();
+      const lowerHref = href.toLowerCase();
+      if (!lowerHref.includes(`/paneladmin/sites/${siteName}`)) continue;
+      if (
+        text.includes("ssh") ||
+        text.includes("key") ||
+        text.includes("developer") ||
+        text.includes("access") ||
+        lowerHref.includes("ssh") ||
+        lowerHref.includes("key") ||
+        lowerHref.includes("dev")
+      ) {
+        candidates.push(href);
+      }
     }
-  }
+    return [...new Set(candidates)].slice(0, 20);
+  }, encodedSite);
+  const candidates = [startUrl, ...discovered.map((h) => (h.startsWith("http") ? h : `https://my.siteground.com${h}`))];
 
+  const visited = [];
+  const sshLines = [];
   const keyLike = [];
-  for (const line of lines) {
-    if (line.startsWith("ssh-rsa ") || line.startsWith("ssh-ed25519 ") || line.includes("SHA256:")) {
-      keyLike.push(line);
+
+  for (const candidate of candidates) {
+    const url = candidate.startsWith("http") ? candidate : `https://my.siteground.com${candidate}`;
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(1200);
+      visited.push(page.url());
+      const allText = ((await page.textContent("body")) || "").replace(/\r/g, "");
+      const lines = allText.split("\n").map((s) => s.trim()).filter(Boolean);
+
+      for (const line of lines) {
+        const lower = line.toLowerCase();
+        if (
+          lower.includes("ssh key") ||
+          lower.includes("public key") ||
+          lower.includes("fingerprint") ||
+          lower.includes("authorized key") ||
+          line.startsWith("ssh-rsa ") ||
+          line.startsWith("ssh-ed25519 ") ||
+          line.includes("SHA256:")
+        ) {
+          sshLines.push(line);
+        }
+      }
+      for (const line of lines) {
+        if (line.startsWith("ssh-rsa ") || line.startsWith("ssh-ed25519 ") || line.includes("SHA256:")) {
+          keyLike.push(line);
+        }
+      }
+    } catch (_err) {
+      visited.push(`${url} [failed]`);
     }
   }
 
@@ -176,6 +232,7 @@ async function listSshKeys(page, site) {
 
   return {
     site,
+    visitedUrls: [...new Set(visited)].slice(0, 50),
     sshSignalsCount: uniqueSshLines.length,
     sshSignals: uniqueSshLines,
     keyMaterialHints: uniqueKeyLike,
@@ -198,7 +255,7 @@ async function main() {
     process.exit(2);
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: isHeadless() });
   const statePath = authStatePath();
   let context;
   let page;

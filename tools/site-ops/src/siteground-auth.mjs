@@ -2,6 +2,7 @@
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline/promises";
 
 function credentials() {
   const email = process.env.SITEGROUND_EMAIL || process.env.SG_USERNAME || "";
@@ -28,6 +29,41 @@ async function classify(page) {
   if (bodyText.includes("captcha") || bodyText.includes("verify you are human") || bodyText.includes("security challenge")) return "challenge_required";
   if (currentUrl.includes("login.siteground.com")) return "login_page_timeout";
   return "unknown";
+}
+
+async function checkAuthenticated(page) {
+  const current = await classify(page);
+  if (current === "authenticated") return "authenticated";
+  try {
+    await page.goto("https://my.siteground.com/paneladmin/domains", {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
+    });
+  } catch (_err) {}
+  return classify(page);
+}
+
+async function waitForHumanCompletion(page) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    await page.waitForURL((url) => url.href.includes("my.siteground.com") && !url.href.includes("login"), {
+      timeout: 300000
+    });
+    return await checkAuthenticated(page);
+  }
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    for (;;) {
+      const state = await checkAuthenticated(page);
+      if (state === "authenticated") return state;
+      const answer = await rl.question(
+        `Challenge/2FA still pending (state=${state}). Complete it in the browser, then press Enter to continue (q to abort): `
+      );
+      if (answer.trim().toLowerCase() === "q") return state;
+    }
+  } finally {
+    rl.close();
+  }
 }
 
 async function main() {
@@ -60,10 +96,8 @@ async function main() {
     await loginBtn.waitFor({ state: "visible", timeout: 15000 });
     await loginBtn.click();
 
-    console.log("Complete any challenge/2FA in the opened browser window. Waiting up to 5 minutes...");
-    await page.waitForURL((url) => url.href.includes("my.siteground.com") && !url.href.includes("login"), { timeout: 300000 });
-
-    const state = await classify(page);
+    console.log("Browser opened. Complete captcha/2FA in that window; this command will wait for you.");
+    const state = await waitForHumanCompletion(page);
     if (state !== "authenticated") {
       console.log(JSON.stringify({ ok: false, state, url: page.url(), authStatePath: statePath, elapsedMs: Date.now() - started }, null, 2));
       process.exitCode = 1;
