@@ -1,0 +1,16 @@
+services:
+  site-ops:
+    build:
+      context: ..
+      dockerfile: mcp/Dockerfile
+    image: local-toolkit/site-ops-mcp:latest
+    init: true
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace:rw
+      - site_ops_node_modules:/workspace/tools/site-ops/node_modules
+
+volumes:
+  site_ops_node_modules:

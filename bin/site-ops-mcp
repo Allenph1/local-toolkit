@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_FILE="${ROOT_DIR}/mcp/docker-compose.yml"
+IMAGE="local-toolkit/site-ops-mcp:latest"
+VOLUME="local-toolkit_site_ops_node_modules"
+ENV_FILE="$(mktemp)"
+trap 'rm -f "$ENV_FILE"' EXIT
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "site-ops-mcp: docker is unavailable" >&2
+  exit 127
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  echo "site-ops-mcp: docker compose is unavailable" >&2
+  exit 127
+fi
+
+"${ROOT_DIR}/bin/mcp-autostart" >/dev/null 2>&1 || true
+
+for name in SITEGROUND_EMAIL SITEGROUND_PASSWORD; do
+  if [[ -n "${!name:-}" ]]; then
+    printf '%s=%s\n' "$name" "${!name}" >> "$ENV_FILE"
+  fi
+done
+
+exec docker run --rm -i \
+  --env-file "$ENV_FILE" \
+  --volume "${ROOT_DIR}:/workspace:rw" \
+  --volume "${VOLUME}:/workspace/tools/site-ops/node_modules" \
+  --workdir /workspace \
+  "$IMAGE" \
+  python3 /workspace/mcp/site_ops_mcp_server.py

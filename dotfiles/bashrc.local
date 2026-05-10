@@ -20,3 +20,7 @@ alias gp='git pull --ff-only'
 if [ -d "$HOME/local-toolkit/bin" ]; then
   export PATH="$HOME/local-toolkit/bin:$PATH"
 fi
+
+if shopt -q login_shell 2>/dev/null && [ -x "$HOME/local-toolkit/bin/mcp-autostart" ]; then
+  "$HOME/local-toolkit/bin/mcp-autostart" >/dev/null 2>&1 &
+fi

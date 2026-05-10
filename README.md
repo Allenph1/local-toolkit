@@ -39,6 +39,13 @@ npm run probe -- --url https://example.com
 npm test
 ```
 
+## MCP runtime
+
+- MCP servers are dockerized under `mcp/`
+- Login shells auto-start the MCP stack when Docker is available
+- Use `bin/site-ops-mcp` to run the Site Ops MCP over Docker
+- CI builds the MCP image and smoke-tests `tools/list`
+
 ## Secret injection
 
 - Store secret values in `pass`

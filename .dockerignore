@@ -1,0 +1,11 @@
+.git
+.github
+.copilot
+node_modules
+tools/site-ops/node_modules
+tools/site-ops/playwright-report
+tools/site-ops/test-results
+**/__pycache__
+**/*.pyc
+**/.venv
+*.log
