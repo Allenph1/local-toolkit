@@ -2,6 +2,7 @@
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import readline from "node:readline/promises";
 
 function credentials() {
   const email = process.env.SITEGROUND_EMAIL || process.env.SG_USERNAME || "";
@@ -15,6 +16,14 @@ function authStatePath() {
 
 function browserProfileDir() {
   return process.env.SG_BROWSER_PROFILE_DIR || path.resolve(process.cwd(), ".data/sg-browser-profile");
+}
+
+function captureTracePath() {
+  return path.resolve(process.cwd(), ".data/siteground-live-capture.trace.zip");
+}
+
+function captureScreenshotPath() {
+  return path.resolve(process.cwd(), ".data/siteground-live-capture.png");
 }
 
 function ensureParentDir(filePath) {
@@ -53,6 +62,15 @@ async function waitForHumanCompletion(page) {
   return await checkAuthenticated(page);
 }
 
+async function waitForCaptureStop() {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    await rl.question("Now demonstrate your UI flow in this same window. Press Enter here when done to stop capture: ");
+  } finally {
+    rl.close();
+  }
+}
+
 async function main() {
   const started = Date.now();
   const { email, password } = credentials();
@@ -60,8 +78,18 @@ async function main() {
     console.error("Missing SiteGround credentials. Set SITEGROUND_EMAIL/SITEGROUND_PASSWORD or SG_USERNAME/SG_PASSWORD.");
     process.exit(2);
   }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error("sg-live-capture requires an interactive terminal (TTY).");
+    process.exit(2);
+  }
 
   const statePath = authStatePath();
+  const tracePath = captureTracePath();
+  const screenshotPath = captureScreenshotPath();
+  ensureParentDir(statePath);
+  ensureParentDir(tracePath);
+  ensureParentDir(screenshotPath);
+
   const profileDir = browserProfileDir();
   ensureParentDir(path.join(profileDir, ".keep"));
   const context = await chromium.launchPersistentContext(profileDir, {
@@ -88,16 +116,23 @@ async function main() {
     await loginBtn.waitFor({ state: "visible", timeout: 15000 });
     await loginBtn.click();
 
-    console.log("Browser opened. Complete captcha/2FA in that window; this command will wait for you.");
+    console.log("Browser opened. Complete captcha/2FA in this same window.");
     const state = await waitForHumanCompletion(page);
     if (state !== "authenticated") {
-      console.log(JSON.stringify({ ok: false, state, url: page.url(), authStatePath: statePath, elapsedMs: Date.now() - started }, null, 2));
+      console.log(JSON.stringify({ ok: false, state, url: page.url(), elapsedMs: Date.now() - started }, null, 2));
       process.exitCode = 1;
       return;
     }
 
-    ensureParentDir(statePath);
     await context.storageState({ path: statePath });
+    await page.goto("https://my.siteground.com/paneladmin/sites", { waitUntil: "domcontentloaded", timeout: 30000 });
+
+    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    await waitForCaptureStop();
+    await context.tracing.stop({ path: tracePath });
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await context.storageState({ path: statePath });
+
     console.log(
       JSON.stringify(
         {
@@ -105,6 +140,8 @@ async function main() {
           state: "authenticated",
           url: page.url(),
           authStatePath: statePath,
+          tracePath,
+          screenshotPath,
           elapsedMs: Date.now() - started
         },
         null,
@@ -113,7 +150,7 @@ async function main() {
     );
   } catch (error) {
     const state = await classify(page).catch(() => "unknown");
-    console.log(JSON.stringify({ ok: false, state, error: String(error), url: page.url(), authStatePath: statePath, elapsedMs: Date.now() - started }, null, 2));
+    console.log(JSON.stringify({ ok: false, state, error: String(error), url: page.url(), elapsedMs: Date.now() - started }, null, 2));
     process.exitCode = 1;
   } finally {
     await context.close();
