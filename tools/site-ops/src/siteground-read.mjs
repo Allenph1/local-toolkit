@@ -246,7 +246,7 @@ async function main() {
     if (auth.state !== "authenticated") {
       const prompt =
         auth.state === "challenge_required" || auth.state === "pending_2fa" || auth.state === "login_page_timeout"
-          ? "Automatic login hit a challenge/verification step. Complete challenge in SiteGround, then rerun this command; it will auto-continue and cache session state when successful."
+          ? "Automatic login hit a challenge/verification step. Run `secrets run -- npm run sg-auth` to open a browser window, complete challenge/2FA, then rerun the read command."
           : null;
       console.log(
         JSON.stringify(
@@ -258,7 +258,8 @@ async function main() {
             loginStatus: auth.loginStatus,
             readOnly: true,
             prompt,
-            nextCommand: `secrets run -- npm run sg-read -- ${args.action}${args.site ? ` --site ${args.site}` : ""}`,
+            nextCommand: "secrets run -- npm run sg-auth",
+            continueCommand: `secrets run -- npm run sg-read -- ${args.action}${args.site ? ` --site ${args.site}` : ""}`,
             authStatePath: statePath,
             usedSavedSession,
             elapsedMs: Date.now() - started,

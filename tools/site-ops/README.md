@@ -48,12 +48,13 @@ Accepted credential env names: `SITEGROUND_EMAIL`/`SITEGROUND_PASSWORD` or `SG_U
 SiteGround read-only inventory (no mutations):
 
 ```bash
+secrets run -- npm run sg-auth
 secrets run -- npm run sg-read -- list-sites
 secrets run -- npm run sg-read -- list-ssh-keys --site example.com
 ```
 
 `sg-read` tries cached auth first (`.data/siteground-auth.json`), then automatic login.
-If a challenge/2FA blocks automation, it returns a prompt and `nextCommand`; complete the challenge and rerun.
+If a challenge/2FA blocks automation, run `secrets run -- npm run sg-auth` to open a browser, complete challenge/2FA, then rerun `sg-read`.
 
 Example map file:
 
