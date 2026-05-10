@@ -17,10 +17,15 @@ function parseArgs() {
   return out;
 }
 
-const { email, password, screenshot } = parseArgs();
+const { email: argEmail, password: argPassword, screenshot } = parseArgs();
+const email = argEmail || process.env.SITEGROUND_EMAIL;
+const password = argPassword || process.env.SITEGROUND_PASSWORD;
 
 if (!email || !password) {
-  console.error("Usage: npm run probe-sg -- --email USER --password PASS [--screenshot file.png]");
+  console.error(
+    "Usage: SITEGROUND_EMAIL=USER SITEGROUND_PASSWORD=PASS npm run probe-sg\n" +
+      "   or: npm run probe-sg -- --email USER --password PASS [--screenshot file.png]"
+  );
   process.exit(2);
 }
 

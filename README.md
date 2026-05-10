@@ -39,6 +39,20 @@ npm run probe -- --url https://example.com
 npm test
 ```
 
+## Secret injection
+
+- Store secret values in `pass`
+- Put secret name mappings in `~/.config/local-toolkit/secrets.map`
+- Run any command through `secret-run -- ...` to load them into that process only
+- SiteGround probes can then run with `SITEGROUND_EMAIL` and `SITEGROUND_PASSWORD` without putting values on the command line
+
+Example map:
+
+```text
+SITEGROUND_EMAIL=pass:siteground/email
+SITEGROUND_PASSWORD=pass:siteground/password
+```
+
 ## Notes
 
 - Keep credentials out of git. Use env vars and local secret stores.

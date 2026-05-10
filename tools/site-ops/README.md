@@ -11,6 +11,7 @@ Playwright-based local automation for:
 - Never hardcode credentials in code or repo.
 - Pull credentials from environment variables or local keychain tooling.
 - For high-risk logins (like SiteGround), require manual 2FA completion.
+- For local secret injection, use `secret-run -- ...` with `~/.config/local-toolkit/secrets.map` and `pass`.
 
 ## Commands
 
@@ -19,7 +20,7 @@ npm install
 npx playwright install chromium
 npm run probe -- --url https://example.com --screenshot artifacts/example.png
 npm test
-npm run probe-sg -- --email user@example.com --password pass [--screenshot artifacts/sg.png]
+secret-run -- npm run probe-sg [--screenshot artifacts/sg.png]
 ```
 
 ## SiteGround automation
@@ -27,13 +28,20 @@ npm run probe-sg -- --email user@example.com --password pass [--screenshot artif
 SiteGround tests automatically skip without credentials:
 
 ```bash
-SITEGROUND_EMAIL=user@example.com SITEGROUND_PASSWORD=pass npm test
+secret-run -- npm test
 ```
 
 SiteGround direct probe (includes 2FA checkpoint):
 
 ```bash
-npm run probe-sg -- --email user@example.com --password pass
+secret-run -- npm run probe-sg
+```
+
+Example map file:
+
+```text
+SITEGROUND_EMAIL=pass:siteground/email
+SITEGROUND_PASSWORD=pass:siteground/password
 ```
 
 **2FA Workflow:** When prompted for 2FA, manually complete it in the browser and the test will detect success/failure automatically.

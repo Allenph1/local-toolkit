@@ -7,8 +7,10 @@ HISTFILESIZE=100000
 HISTCONTROL=ignoredups:erasedups
 PROMPT_COMMAND="history -a; history -c; history -r; $PROMPT_COMMAND"
 
-export EDITOR="emacsclient -t -a emacs"
+export EDITOR="emacs -nw"
 export VISUAL="$EDITOR"
+export GIT_EDITOR="$EDITOR"
+export GIT_SEQUENCE_EDITOR="$EDITOR"
 
 alias ll='ls -lah --color=auto'
 alias gs='git status -sb'

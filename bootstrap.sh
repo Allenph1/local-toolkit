@@ -20,7 +20,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 install_packages() {
-  local pkgs=(git curl tmux emacs-nox python3 python3-pip python3-venv nodejs npm ripgrep net-tools telnet gh)
+  local pkgs=(git curl tmux emacs-nox pass gnupg python3 python3-pip python3-venv nodejs npm ripgrep net-tools telnet gh)
   if command -v apt-get >/dev/null 2>&1; then
     sudo apt-get update -y
     sudo apt-get install -y "${pkgs[@]}"
