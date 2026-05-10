@@ -6,6 +6,9 @@ Exposes:
   - siteground_probe(screenshot_path?)
   - siteground_list_sites(screenshot_path?)
   - siteground_list_ssh_keys(site, screenshot_path?)
+  - siteground_api_capture(start_url?)
+  - siteground_api_list_calls()
+  - siteground_api_call(match, method?, data?)
 """
 
 import json
@@ -73,6 +76,39 @@ def list_tools():
                         "screenshot_path": {"type": "string"},
                     },
                     "required": [],
+                },
+            },
+            {
+                "name": "siteground_api_capture",
+                "description": "Interactive: capture SG XHR/fetch API calls while you perform a UI flow in one session.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "start_url": {"type": "string"},
+                    },
+                    "required": [],
+                },
+            },
+            {
+                "name": "siteground_api_list_calls",
+                "description": "List captured SiteGround API calls from the last capture run.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
+            {
+                "name": "siteground_api_call",
+                "description": "Execute a captured SiteGround API call directly (API-first flow).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "match": {"type": "string"},
+                        "method": {"type": "string"},
+                        "data": {"type": "string"},
+                    },
+                    "required": ["match"],
                 },
             },
         ]
@@ -166,6 +202,31 @@ def call_siteground_list_ssh_keys(arguments):
     return run_site_ops_command(cmd)
 
 
+def call_siteground_api_capture(arguments):
+    start_url = arguments.get("start_url")
+    cmd = ["npm", "run", "sg-api", "--", "capture"]
+    if start_url:
+        cmd.extend(["--url", start_url])
+    return run_site_ops_command(cmd)
+
+
+def call_siteground_api_list_calls(_arguments):
+    cmd = ["npm", "run", "sg-api", "--", "list-calls"]
+    return run_site_ops_command(cmd)
+
+
+def call_siteground_api_call(arguments):
+    match = arguments.get("match")
+    method = arguments.get("method")
+    data = arguments.get("data")
+    cmd = ["npm", "run", "sg-api", "--", "call", "--match", match]
+    if method:
+        cmd.extend(["--method", method])
+    if data:
+        cmd.extend(["--data", data])
+    return run_site_ops_command(cmd)
+
+
 def send(msg):
     sys.stdout.write(json.dumps(msg) + "\n")
     sys.stdout.flush()
@@ -198,6 +259,12 @@ def main():
                 send({"jsonrpc": "2.0", "id": req_id, "result": call_siteground_list_sites(arguments)})
             elif name == "siteground_list_ssh_keys":
                 send({"jsonrpc": "2.0", "id": req_id, "result": call_siteground_list_ssh_keys(arguments)})
+            elif name == "siteground_api_capture":
+                send({"jsonrpc": "2.0", "id": req_id, "result": call_siteground_api_capture(arguments)})
+            elif name == "siteground_api_list_calls":
+                send({"jsonrpc": "2.0", "id": req_id, "result": call_siteground_api_list_calls(arguments)})
+            elif name == "siteground_api_call":
+                send({"jsonrpc": "2.0", "id": req_id, "result": call_siteground_api_call(arguments)})
             else:
                 send(
                     {

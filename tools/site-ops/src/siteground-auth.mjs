@@ -38,19 +38,37 @@ async function checkAuthenticated(page) {
   return classify(page);
 }
 
-async function waitForHumanCompletion(page) {
+function resolveActivePage(context, page) {
+  if (page && !page.isClosed()) return page;
+  const openPages = context.pages().filter((p) => !p.isClosed());
+  return openPages.length > 0 ? openPages[openPages.length - 1] : null;
+}
+
+async function waitForHumanCompletion(context, page) {
   const deadline = Date.now() + 5 * 60 * 1000;
   let lastState = "unknown";
+  let activePage = page;
   while (Date.now() < deadline) {
-    const state = await checkAuthenticated(page);
-    if (state === "authenticated") return state;
-    if (state !== lastState) {
-      console.log(`Waiting for challenge/2FA completion... current state=${state}`);
-      lastState = state;
+    activePage = resolveActivePage(context, activePage);
+    if (!activePage) {
+      await new Promise((r) => setTimeout(r, 1000));
+      continue;
     }
-    await page.waitForTimeout(4000);
+    try {
+      const state = await checkAuthenticated(activePage);
+      if (state === "authenticated") return { state, page: activePage };
+      if (state !== lastState) {
+        console.log(`Waiting for challenge/2FA completion... current state=${state}`);
+        lastState = state;
+      }
+      await activePage.waitForTimeout(4000);
+    } catch (_err) {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
   }
-  return await checkAuthenticated(page);
+  activePage = resolveActivePage(context, activePage);
+  const finalState = activePage ? await checkAuthenticated(activePage) : "unknown";
+  return { state: finalState, page: activePage };
 }
 
 async function main() {
@@ -89,9 +107,11 @@ async function main() {
     await loginBtn.click();
 
     console.log("Browser opened. Complete captcha/2FA in that window; this command will wait for you.");
-    const state = await waitForHumanCompletion(page);
+    const waitResult = await waitForHumanCompletion(context, page);
+    const state = waitResult.state;
+    const activePage = waitResult.page || page;
     if (state !== "authenticated") {
-      console.log(JSON.stringify({ ok: false, state, url: page.url(), authStatePath: statePath, elapsedMs: Date.now() - started }, null, 2));
+      console.log(JSON.stringify({ ok: false, state, url: activePage.url(), authStatePath: statePath, elapsedMs: Date.now() - started }, null, 2));
       process.exitCode = 1;
       return;
     }
@@ -103,7 +123,7 @@ async function main() {
         {
           ok: true,
           state: "authenticated",
-          url: page.url(),
+          url: activePage.url(),
           authStatePath: statePath,
           elapsedMs: Date.now() - started
         },

@@ -60,7 +60,22 @@ UI flow capture helper (for demonstrating exact click paths/selectors):
 
 ```bash
 secrets run -- npm run ui-capture -- https://my.siteground.com
+secrets run -- npm run sg-capture
+secrets run -- npm run sg-live-capture
 ```
+
+`sg-capture` layers auth + capture in one command: it runs `sg-auth` first, then opens codegen with saved authenticated storage state.
+`sg-live-capture` keeps a single browser window for captcha + your manual demo flow, then saves a Playwright trace and screenshot.
+
+API-first workflow (preferred once session is authenticated):
+
+```bash
+secrets run -- npm run sg-api -- capture
+secrets run -- npm run sg-api -- list-calls
+secrets run -- npm run sg-api -- call --match /ssh
+```
+
+This keeps one persistent browser profile/session and lets you pivot from UI discovery to direct SG API calls.
 
 Example map file:
 

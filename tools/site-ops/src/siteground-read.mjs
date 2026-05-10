@@ -97,6 +97,10 @@ function authStatePath() {
   return process.env.SITEGROUND_AUTH_STATE || path.resolve(process.cwd(), ".data/siteground-auth.json");
 }
 
+function browserProfileDir() {
+  return process.env.SG_BROWSER_PROFILE_DIR || path.resolve(process.cwd(), ".data/sg-browser-profile");
+}
+
 function isHeadless() {
   const raw = (process.env.SG_HEADLESS || "true").toLowerCase();
   return !(raw === "0" || raw === "false" || raw === "no");
@@ -255,30 +259,21 @@ async function main() {
     process.exit(2);
   }
 
-  const browser = await chromium.launch({ headless: isHeadless() });
   const statePath = authStatePath();
-  let context;
-  let page;
+  const profileDir = browserProfileDir();
+  ensureParentDir(path.join(profileDir, ".keep"));
+  let context = await chromium.launchPersistentContext(profileDir, {
+    channel: process.env.SG_BROWSER_CHANNEL || "chromium",
+    headless: isHeadless(),
+    viewport: { width: 1366, height: 900 }
+  });
+  let page = context.pages()[0] || (await context.newPage());
 
   try {
-    let auth;
-    let usedSavedSession = false;
-
-    if (hasStateFile(statePath)) {
-      context = await browser.newContext({ storageState: statePath });
-      page = await context.newPage();
-      auth = await checkAuthenticatedSession(page);
-      usedSavedSession = auth.authenticated;
-      if (!auth.authenticated) {
-        await context.close();
-        context = undefined;
-        page = undefined;
-      }
-    }
+    let auth = await checkAuthenticatedSession(page);
+    let usedSavedSession = auth.authenticated;
 
     if (!usedSavedSession) {
-      context = await browser.newContext();
-      page = await context.newPage();
       auth = await loginAndClassify(page, email, password);
 
       if (auth.state === "authenticated") {
@@ -415,7 +410,6 @@ async function main() {
     process.exitCode = 1;
   } finally {
     if (context) await context.close();
-    await browser.close();
   }
 }
 

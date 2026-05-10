@@ -10,6 +10,11 @@ function credentials() {
   return { email, password };
 }
 
+function useManualLogin() {
+  const raw = (process.env.SG_MANUAL_LOGIN || "true").toLowerCase();
+  return !(raw === "0" || raw === "false" || raw === "no");
+}
+
 function authStatePath() {
   return process.env.SITEGROUND_AUTH_STATE || path.resolve(process.cwd(), ".data/siteground-auth.json");
 }
@@ -47,19 +52,37 @@ async function checkAuthenticated(page) {
   return classify(page);
 }
 
-async function waitForHumanCompletion(page) {
-  const deadline = Date.now() + 5 * 60 * 1000;
+function resolveActivePage(context, page) {
+  if (page && !page.isClosed()) return page;
+  const openPages = context.pages().filter((p) => !p.isClosed());
+  return openPages.length > 0 ? openPages[openPages.length - 1] : null;
+}
+
+async function waitForHumanCompletion(context, page) {
+  const deadline = Date.now() + 15 * 60 * 1000;
   let lastState = "unknown";
+  let activePage = page;
   while (Date.now() < deadline) {
-    const state = await checkAuthenticated(page);
-    if (state === "authenticated") return state;
-    if (state !== lastState) {
-      console.log(`Waiting for challenge/2FA completion... current state=${state}`);
-      lastState = state;
+    activePage = resolveActivePage(context, activePage);
+    if (!activePage) {
+      await new Promise((r) => setTimeout(r, 1000));
+      continue;
     }
-    await page.waitForTimeout(4000);
+    try {
+      const state = await checkAuthenticated(activePage);
+      if (state === "authenticated") return { state, page: activePage };
+      if (state !== lastState) {
+        console.log(`Waiting for challenge/2FA completion... current state=${state}`);
+        lastState = state;
+      }
+      await activePage.waitForTimeout(4000);
+    } catch (_err) {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
   }
-  return await checkAuthenticated(page);
+  activePage = resolveActivePage(context, activePage);
+  const finalState = activePage ? await checkAuthenticated(activePage) : "unknown";
+  return { state: finalState, page: activePage };
 }
 
 async function waitForCaptureStop() {
@@ -74,7 +97,8 @@ async function waitForCaptureStop() {
 async function main() {
   const started = Date.now();
   const { email, password } = credentials();
-  if (!email || !password) {
+  const manualLogin = useManualLogin();
+  if (!manualLogin && (!email || !password)) {
     console.error("Missing SiteGround credentials. Set SITEGROUND_EMAIL/SITEGROUND_PASSWORD or SG_USERNAME/SG_PASSWORD.");
     process.exit(2);
   }
@@ -106,31 +130,35 @@ async function main() {
       if (await acceptBtn.isVisible({ timeout: 1500 })) await acceptBtn.click();
     } catch (_err) {}
 
-    const emailInput = page.locator("input[name='username'], input[type='email'], input[placeholder*='Email']").first();
-    const passwordInput = page.locator("input[name*='password'], input[type='password']").first();
-    const loginBtn = page.locator("button:has-text('LOGIN'), button:has-text('Login'):not(:has-text('Google')), button[type='submit']").first();
-    await emailInput.waitFor({ state: "visible", timeout: 15000 });
-    await emailInput.fill(email);
-    await passwordInput.waitFor({ state: "visible", timeout: 15000 });
-    await passwordInput.fill(password);
-    await loginBtn.waitFor({ state: "visible", timeout: 15000 });
-    await loginBtn.click();
-
-    console.log("Browser opened. Complete captcha/2FA in this same window.");
-    const state = await waitForHumanCompletion(page);
+    if (manualLogin) {
+      console.log("Browser opened at SiteGround home. Complete login/captcha/2FA manually in this same window.");
+    } else {
+      const emailInput = page.locator("input[name='username'], input[type='email'], input[placeholder*='Email']").first();
+      const passwordInput = page.locator("input[name*='password'], input[type='password']").first();
+      const loginBtn = page.locator("button:has-text('LOGIN'), button:has-text('Login'):not(:has-text('Google')), button[type='submit']").first();
+      await emailInput.waitFor({ state: "visible", timeout: 15000 });
+      await emailInput.fill(email);
+      await passwordInput.waitFor({ state: "visible", timeout: 15000 });
+      await passwordInput.fill(password);
+      await loginBtn.waitFor({ state: "visible", timeout: 15000 });
+      await loginBtn.click();
+      console.log("Browser opened. Complete captcha/2FA in this same window.");
+    }
+    const waitResult = await waitForHumanCompletion(context, page);
+    const state = waitResult.state;
+    const activePage = waitResult.page || page;
     if (state !== "authenticated") {
-      console.log(JSON.stringify({ ok: false, state, url: page.url(), elapsedMs: Date.now() - started }, null, 2));
+      console.log(JSON.stringify({ ok: false, state, url: activePage.url(), elapsedMs: Date.now() - started }, null, 2));
       process.exitCode = 1;
       return;
     }
 
     await context.storageState({ path: statePath });
-    await page.goto("https://my.siteground.com/paneladmin/sites", { waitUntil: "domcontentloaded", timeout: 30000 });
 
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
     await waitForCaptureStop();
     await context.tracing.stop({ path: tracePath });
-    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await activePage.screenshot({ path: screenshotPath, fullPage: true });
     await context.storageState({ path: statePath });
 
     console.log(
@@ -138,7 +166,7 @@ async function main() {
         {
           ok: true,
           state: "authenticated",
-          url: page.url(),
+          url: activePage.url(),
           authStatePath: statePath,
           tracePath,
           screenshotPath,
