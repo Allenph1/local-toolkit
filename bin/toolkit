@@ -101,27 +101,33 @@ EOF
   fi
   [[ -t 0 ]] && mcp_stdio_usage
 
-  (
-    set -euo pipefail
-    env_file="$(mktemp)"
-    trap 'rm -f "$env_file"' EXIT
+  siteground_email="${SITEGROUND_EMAIL:-${SG_USERNAME:-${SG_EMAIL:-${SITEGROUND_USERNAME:-}}}}"
+  siteground_password="${SITEGROUND_PASSWORD:-${SG_PASSWORD:-}}"
 
-    for name in SITEGROUND_EMAIL SITEGROUND_PASSWORD; do
-      value="${!name:-}"
-      if [[ -n "$value" ]]; then
-        [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || tk_die "$name contains a newline; toolkit mcp site-ops only supports single-line secrets"
-        printf '%s=%s\n' "$name" "$value" >> "$env_file"
-      fi
-    done
+  for pair in \
+    "SITEGROUND_EMAIL:${siteground_email}" \
+    "SG_USERNAME:${siteground_email}" \
+    "SITEGROUND_PASSWORD:${siteground_password}" \
+    "SG_PASSWORD:${siteground_password}"
+  do
+    name="${pair%%:*}"
+    value="${pair#*:}"
+    if [[ -n "$value" ]]; then
+      [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || tk_die "$name contains a newline; toolkit mcp site-ops only supports single-line secrets"
+      export "$name=$value"
+    fi
+  done
 
-    tk_docker_exec run --rm -i \
-      --env-file "$env_file" \
-      --volume "${ROOT_DIR}:/workspace:rw" \
-      --volume "local-toolkit_site_ops_node_modules:/workspace/tools/site-ops/node_modules" \
-      --workdir /workspace \
-      local-toolkit/site-ops-mcp:latest \
-      python3 /workspace/mcp/site_ops_mcp_server.py
-  )
+  tk_docker_exec run --rm -i \
+    --env SITEGROUND_EMAIL \
+    --env SG_USERNAME \
+    --env SITEGROUND_PASSWORD \
+    --env SG_PASSWORD \
+    --volume "${ROOT_DIR}:/workspace:rw" \
+    --volume "local-toolkit_site_ops_node_modules:/workspace/tools/site-ops/node_modules" \
+    --workdir /workspace \
+    local-toolkit/site-ops-mcp:latest \
+    python3 /workspace/mcp/site_ops_mcp_server.py
 }
 
 mcp_memory() {

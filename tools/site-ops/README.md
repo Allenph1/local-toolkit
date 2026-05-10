@@ -43,6 +43,8 @@ SiteGround direct probe (includes 2FA checkpoint):
 secret-run -- npm run probe-sg
 ```
 
+Accepted credential env names: `SITEGROUND_EMAIL`/`SITEGROUND_PASSWORD` or `SG_USERNAME`/`SG_PASSWORD`.
+
 Example map file:
 
 ```text
